@@ -7,6 +7,7 @@ from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.keys import Keys
 import time
+import copy
 
 firefox_profile = webdriver.FirefoxProfile()
 firefox_profile.set_preference('permissions.default.image', 2)
@@ -58,7 +59,8 @@ def close_popup(webdriver):
             print("There was no consent button. But here's the original error:\n{}".format(repr(e)))
             time.sleep(0.5)
 
-all_matches = {k: [] for k,v in potential_leagues.items()}
+all_matches_unclean = {k: [] for k,v in potential_leagues.items()}
+all_matches_clean = {k: [] for k,v in potential_leagues.items()}
 
 for league_id,league_url in potential_leagues.items():    
     if league_id == 'fr_ligue2':
@@ -108,7 +110,7 @@ for league_id,league_url in potential_leagues.items():
                 elif "PSTP" in score:   # Postponed match, skip
                     continue
                 match_url = element.find_element_by_class_name("score-time").find_element_by_tag_name('a').get_attribute('href')
-                all_matches[league_id].append({'match_time': match_time_ms,
+                all_matches_unclean[league_id].append({'match_time': match_time_ms,
                                             'home_team': home_team, 
                                             'away_team': away_team, 
                                             'score': score,
@@ -118,14 +120,50 @@ for league_id,league_url in potential_leagues.items():
             # Be kind to soccerway..
             time.sleep(0.5)
         
+    # After looping through all the teams in a league, remove duplicates and then proceed
+    all_matches_clean[league_id] = [i for idx,i in enumerate(all_matches_unclean[league_id]) if i not in all_matches_unclean[league_id][idx+1:]]
+    
+    # Loop through all matches in filtered list and gather extra data.
+    for unique_match in all_matches_clean['fr_ligue1']:
+        if unique_match == all_matches_clean['fr_ligue1'][1]:
+            break
+        driver.get(unique_match['match_url'])
+        match_id = unique_match['match_url'].split('/')[-2]
+        half_time = driver.find_element_by_xpath("//dl[dt='Half-time']/dd[1]").text
+        
+        # Switch focus to stats table:        
+        stats = driver.find_element_by_xpath("//div//iframe[@src='/charts/statsplus/{}/']".format(match_id))
+        driver.switch_to.frame(stats)
+        # Home stats
+        home_corners = driver.find_element_by_xpath("//td[text()='Corners']/preceding-sibling::td").text
+        home_offsides = driver.find_element_by_xpath("//td[text()='Offsides']/preceding-sibling::td").text
+        home_shots_on_target = driver.find_element_by_xpath("//td[text()='Shots on target']/preceding-sibling::td").text
+        home_fouls = driver.find_element_by_xpath("//td[text()='Fouls']/preceding-sibling::td").text
+        # Away stats
+        away_corners = driver.find_element_by_xpath("//td[text()='Corners']/following-sibling::td").text
+        away_shots_on_target = driver.find_element_by_xpath("//td[text()='Shots on target']/following-sibling::td").text
+        away_fouls = driver.find_element_by_xpath("//td[text()='Fouls']/following-sibling::td").text
+        away_offsides = driver.find_element_by_xpath("//td[text()='Offsides']/following-sibling::td").text
+        # Switch focus back        
+        driver.switch_to.default_content()
+        
+        
+
+                            
+
+        
+    
     driver.close()
+
+
 
     
 """
 TODO list:
     1. Create a list of ligues to check for matches up until 2017.
     2. Try to navigate back to previous matches by triggering the "previous" button.
-    3. Gather all matches ending either draw, or handicap win (i.e. 1-0; 2-1; 0-1; 1-2, etc.)
+    3. Gather all matches ending either draw, or handicap win (i.e. 1-0; 2-1; 0-1; 1-2, etc.) --> Gathering all, selecting later
+    3.1. Match characteristics: possession, corners, shots on target, fouls, offsides, goals (halftime, fulltime, home, away)
     4. Gather information to all these matches (i.e. last 5 matches stats, goals, wins,losses,draws, etc.)
     5. Implement neural network.
     6. Try scanning for potential matches and place bets and then check results.
