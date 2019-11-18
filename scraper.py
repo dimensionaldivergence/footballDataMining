@@ -63,10 +63,10 @@ matches_clean_headers   = ['league_id', 'match_time', 'match_url', 'home_team', 
                            'corners', 'offsides', 'shots_on_target', 'fouls']
 
 
-def close_popup(webdriver):
+def close_popup(driver):
     while True:
         try:
-            consent_button = WebDriverWait(driver, 2).until(EC.presence_of_element_located((By.XPATH, "//div[@id='qcCmpButtons']//button[@class='qc-cmp-button']")))
+            consent_button = driver.find_element_by_xpath("//div[@id='qcCmpButtons']//button[@class='qc-cmp-button']")
             consent_button.click()
             break
         except Exception as e:
@@ -121,8 +121,8 @@ elif pd.read_csv(clean_csv).size > 2:
 
 # Start looping through the filtered (or original) league dict.
 for league_id,league_url in potential_leagues.items():    
-    #if league_id == 'fr_ligue2':
-        #break
+    if league_id == 'fr_ligue2':
+        break
     driver = webdriver.Firefox(firefox_profile=firefox_profile)
     driver.get(league_url)
     
