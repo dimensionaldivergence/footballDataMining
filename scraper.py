@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 from datetime import datetime, timezone
+import pytz
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import *
 from selenium.webdriver.common.keys import Keys
 import time
 import copy
+import json,csv
+import os
+from collections import OrderedDict
+import pandas as pd
 
 firefox_profile = webdriver.FirefoxProfile()
 firefox_profile.set_preference('permissions.default.image', 2)
@@ -49,6 +54,11 @@ potential_leagues = {'fr_ligue1': 'https://us.soccerway.com/national/france/ligu
                      'dn_superliga': 'https://us.soccerway.com/national/denmark/superliga/20192020/regular-season/r54285/',
                      'dn_1stdivision': 'https://us.soccerway.com/national/denmark/1st-division/20192020/regular-season/r53778/'}
 
+matches_unclean_headers = ['league_id', 'match_time', 'match_url', 'home_team', 'away_team', 'full_time_score']
+matches_clean_headers   = ['league_id', 'match_time', 'match_url', 'home_team', 'away_team', 'full_time_score', 'half_time_score',
+                           'corners', 'offsides', 'shots_on_target', 'fouls']
+
+
 def close_popup(webdriver):
     while True:
         try:
@@ -59,23 +69,76 @@ def close_popup(webdriver):
             print("There was no consent button. But here's the original error:\n{}".format(repr(e)))
             time.sleep(0.5)
 
-all_matches_unclean = {k: [] for k,v in potential_leagues.items()}
-all_matches_clean = {k: [] for k,v in potential_leagues.items()}
+def wait_for_page_refresh(very_first_match_date):
+    while True:
+        try:
+            last_10_matches = driver.find_elements_by_css_selector("tr[id^='page_team_1_block_team_matches_summary_7']")
+            if very_first_match_date != last_10_matches[0].find_element_by_class_name("full-date").text:
+                print("New data present on page.")
+                very_first_match_date = last_10_matches[0].find_element_by_class_name("full-date").text
+                return last_10_matches, very_first_match_date
+            else:
+                print("Page hasn't refreshed yet.")
+                time.sleep(0.5)    
+        except Exception as e:
+            print("Encountered Exception while in wait_for_page_refresh function:\n{}".format(repr(e)))            
 
+all_matches_unclean = {k: [] for k,v in potential_leagues.items()}
+team_done = None
+run_once = False
+clean_csv = 'all_matches_clean.csv'
+unclean_csv = 'all_matches_unclean.csv'
+
+# Create unclean file if not existing
+if not os.path.isfile(unclean_csv):
+    with open(unclean_csv, 'w') as f:
+        writer = csv.writer(f)
+        writer.writerow(matches_unclean_headers)
+# Create clean file if not existing, otherwise pick up where we left off
+if not os.path.isfile(clean_csv):
+    with open(clean_csv, 'a') as f:
+        writer = csv.writer(f)
+        writer.writerow(matches_clean_headers)    
+elif pd.read_csv(clean_csv).size > 2:
+    clean_unfinished_data = pd.read_csv(clean_csv)
+    last_data = clean_unfinished_data.iloc[-1,3:5]
+    last_data2 = clean_unfinished_data.iloc[-2,3:5]
+    league = clean_unfinished_data.iloc[-1,0]     # All leagues before this are supposed to be ready.
+    team_done = list(set(last_data) & set(last_data2))[0]
+    # Remove already done leagues from the dict
+    for league_id in list(potential_leagues.keys()):
+        if league_id != league:
+            del potential_leagues[league_id]
+            print("Removed: ", league_id)
+        else:
+            break
+
+# Start looping through the filtered (or original) league dict.
 for league_id,league_url in potential_leagues.items():    
-    if league_id == 'fr_ligue2':
-        break
+    #if league_id == 'fr_ligue2':
+        #break
     driver = webdriver.Firefox(firefox_profile=firefox_profile)
     driver.get(league_url)
     
     # Closing pop-up about accepting cookies
-    close_popup(driver)
+    if not run_once:
+        close_popup(driver)
+        run_once = True
 
-    teams = driver.find_elements_by_class_name('team_rank')
-    for team in teams:
-        if team == teams[1]:
-            break
-        team_url = team.find_element_by_class_name('team').find_element_by_tag_name('a').get_attribute('href')        
+    # Remove already done teams from the list
+    teams = driver.find_element_by_xpath("//div[@id='page_competition_1_block_competition_tables_7']").find_elements_by_class_name("team_rank")
+    if team_done:
+        for team in teams[:]:
+            if team.find_element_by_class_name('team').text != team_done:
+                teams.remove(team)
+            else:
+                break
+    teams_urls = [team.find_element_by_class_name('team').find_element_by_tag_name('a').get_attribute('href') for team in teams]
+    
+    # Start iterating on the cleaned data
+    for team_url in teams_urls:
+        #if team_url == teams_urls[1]:
+            #break
         driver.get(team_url)
 
         # Initialize some variables
@@ -84,18 +147,7 @@ for league_id,league_url in potential_leagues.items():
         
         while not first_match_reached:
             # Checking if new data present on page (either in the beginning or after button click)
-            while True:
-                try:
-                    last_10_matches = driver.find_elements_by_css_selector("tr[id^='page_team_1_block_team_matches_summary_7']")
-                    if very_first_match_date != last_10_matches[0].find_element_by_class_name("full-date").text:
-                        print("New data present on page.")
-                        very_first_match_date = last_10_matches[0].find_element_by_class_name("full-date").text
-                        break
-                    else:
-                        raise Exception()
-                except:
-                    print("Page hasn't refreshed yet.")
-                    time.sleep(0.5)
+            last_10_matches, very_first_match_date = wait_for_page_refresh(very_first_match_date)
             
             for element in last_10_matches:
                 match_time_unchecked = element.find_element_by_class_name("full-date").text
@@ -104,56 +156,73 @@ for league_id,league_url in potential_leagues.items():
                     first_match_reached = True
                 home_team = element.find_element_by_class_name("team-a").text
                 away_team = element.find_element_by_class_name("team-b").text
-                score = element.find_element_by_class_name("score-time").text
-                if ":" in score:        # Future matches reached
+                full_time_score = element.find_element_by_class_name("score-time").text
+                if any(c in full_time_score for c in ["P", "E"]):
+                    full_time_score = full_time_score.strip('EP')
+                elif ":" in full_time_score:        # Future matches reached
                     break
-                elif "PSTP" in score:   # Postponed match, skip
+                elif "PSTP" in full_time_score:   # Postponed match, skip
                     continue
                 match_url = element.find_element_by_class_name("score-time").find_element_by_tag_name('a').get_attribute('href')
-                all_matches_unclean[league_id].append({'match_time': match_time_ms,
-                                            'home_team': home_team, 
-                                            'away_team': away_team, 
-                                            'score': score,
-                                            'match_url': match_url})
+
+                # Write data to our csv file:
+                with open(unclean_csv, 'a') as f:
+                    writer = csv.writer(f)
+                    writer.writerow([league_id, match_time_ms, match_url, home_team, away_team, full_time_score])
             
+            # Click on previous and be kind to soccerway..
             button = driver.find_element_by_class_name("previous ").click()
-            # Be kind to soccerway..
             time.sleep(0.5)
         
     # After looping through all the teams in a league, remove duplicates and then proceed
-    all_matches_clean[league_id] = [i for idx,i in enumerate(all_matches_unclean[league_id]) if i not in all_matches_unclean[league_id][idx+1:]]
-    
+    league_id = 'fr_ligue1'
+    # Read file first:
+    all_matches_unclean = pd.read_csv(unclean_csv)
+    all_matches_clean = all_matches_unclean[all_matches_unclean['league_id'] == league_id].drop_duplicates()
+
     # Loop through all matches in filtered list and gather extra data.
-    for unique_match in all_matches_clean['fr_ligue1']:
-        if unique_match == all_matches_clean['fr_ligue1'][1]:
-            break
+    for idx, unique_match in all_matches_clean.iterrows():
+        #if idx == 1:
+            #break
         driver.get(unique_match['match_url'])
         match_id = unique_match['match_url'].split('/')[-2]
         half_time = driver.find_element_by_xpath("//dl[dt='Half-time']/dd[1]").text
+        unique_match = unique_match.append(pd.Series({"half_time_score": half_time}))
         
         # Switch focus to stats table:        
-        stats = driver.find_element_by_xpath("//div//iframe[@src='/charts/statsplus/{}/']".format(match_id))
+        try:
+            stats = driver.find_element_by_xpath("//div//iframe[@src='/charts/statsplus/{}/']".format(match_id))
+        except Exception as e:
+            time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
+            print("{} - Match didn't have stats table, skipping. Here's the original error:".format(time_now), file=open('scraper_error.log', 'a'))
+            print(repr(e), file=open('scraper_error.log', 'a'))
+            continue
         driver.switch_to.frame(stats)
-        # Home stats
+        # Gather stats
         home_corners = driver.find_element_by_xpath("//td[text()='Corners']/preceding-sibling::td").text
-        home_offsides = driver.find_element_by_xpath("//td[text()='Offsides']/preceding-sibling::td").text
-        home_shots_on_target = driver.find_element_by_xpath("//td[text()='Shots on target']/preceding-sibling::td").text
-        home_fouls = driver.find_element_by_xpath("//td[text()='Fouls']/preceding-sibling::td").text
-        # Away stats
         away_corners = driver.find_element_by_xpath("//td[text()='Corners']/following-sibling::td").text
-        away_shots_on_target = driver.find_element_by_xpath("//td[text()='Shots on target']/following-sibling::td").text
-        away_fouls = driver.find_element_by_xpath("//td[text()='Fouls']/following-sibling::td").text
+        unique_match = unique_match.append(pd.Series({"corners": "{} - {}".format(home_corners, away_corners)}))
+        
+        home_offsides = driver.find_element_by_xpath("//td[text()='Offsides']/preceding-sibling::td").text
         away_offsides = driver.find_element_by_xpath("//td[text()='Offsides']/following-sibling::td").text
-        # Switch focus back        
+        unique_match = unique_match.append(pd.Series({"offsides": "{} - {}".format(home_offsides, away_offsides)}))
+        
+        home_shots_on_target = driver.find_element_by_xpath("//td[text()='Shots on target']/preceding-sibling::td").text
+        away_shots_on_target = driver.find_element_by_xpath("//td[text()='Shots on target']/following-sibling::td").text
+        unique_match = unique_match.append(pd.Series({"shots_on_target": "{} - {}".format(home_shots_on_target, away_shots_on_target)}))
+        
+        home_fouls = driver.find_element_by_xpath("//td[text()='Fouls']/preceding-sibling::td").text
+        away_fouls = driver.find_element_by_xpath("//td[text()='Fouls']/following-sibling::td").text
+        unique_match = unique_match.append(pd.Series({"fouls": "{} - {}".format(home_fouls, away_fouls)}))
+        
+        # Switch focus back
         driver.switch_to.default_content()
         
-        
-
-                            
-
-        
+        with open(clean_csv, 'a') as f:
+            writer = csv.writer(f)
+            writer.writerow(unique_match.values[:])
     
-    driver.close()
+driver.close()
 
 
 
@@ -173,3 +242,4 @@ TODO list:
         6.4. Hopefully profit.
 
 """
+
