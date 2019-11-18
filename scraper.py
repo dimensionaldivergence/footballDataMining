@@ -17,6 +17,10 @@ import pandas as pd
 firefox_profile = webdriver.FirefoxProfile()
 firefox_profile.set_preference('permissions.default.image', 2)
 firefox_profile.set_preference('dom.ipc.plugins.enabled.libflashplayer.so', 'false')
+firefox_profile.set_preference("browser.cache.disk.enable", False)
+firefox_profile.set_preference("browser.cache.memory.enable", False)
+firefox_profile.set_preference("browser.cache.offline.enable", False)
+firefox_profile.set_preference("network.http.use-cache", False) 
 
 potential_leagues = {'fr_ligue1': 'https://us.soccerway.com/national/france/ligue-1/20192020/regular-season/r53638/',
                      'fr_ligue2': 'https://us.soccerway.com/national/france/ligue-2/20192020/regular-season/r54072/',
@@ -76,16 +80,15 @@ def wait_for_page_refresh(very_first_match_date):
         try:
             last_10_matches = driver.find_elements_by_css_selector("tr[id^='page_team_1_block_team_matches_summary_7']")
             if very_first_match_date != last_10_matches[0].find_element_by_class_name("full-date").text:
-                print("{} - New data present on page.".format(time_now), file=open('scraper_stdout.log'))
+                print("{} - New data present on page.".format(time_now), file=open('scraper_stdout.log', 'a'))
                 very_first_match_date = last_10_matches[0].find_element_by_class_name("full-date").text
                 return last_10_matches, very_first_match_date
             else:
-                print("{} - Page hasn't refreshed yet.".format(time_now), file=open('scraper_stdout.log'))
+                print("{} - Page hasn't refreshed yet.".format(time_now), file=open('scraper_stdout.log', 'a'))
                 time.sleep(0.5)    
         except Exception as e:
             print("{} - {}".format(time_now, repr(e)), file=open('scraper_error.log', 'a'))
 
-all_matches_unclean = {k: [] for k,v in potential_leagues.items()}
 team_done = None
 run_once = False
 clean_csv = 'all_matches_clean.csv'
@@ -112,7 +115,7 @@ elif pd.read_csv(clean_csv).size > 2:
         if league_id != league:
             del potential_leagues[league_id]
             time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
-            print("{} - Removed: {}".format(time_now, league_id), file=open('scraper_stdout.log'))
+            print("{} - Removed: {}".format(time_now, league_id), file=open('scraper_stdout.log', 'a'))
         else:
             break
 
