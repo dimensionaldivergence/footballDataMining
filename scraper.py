@@ -66,22 +66,24 @@ def close_popup(webdriver):
             consent_button.click()
             break
         except Exception as e:
-            print("There was no consent button. But here's the original error:\n{}".format(repr(e)))
+            time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
+            print("{} - {}".format(time_now, repr(e)), file=open('scraper_error.log', 'a'))
             time.sleep(0.5)
 
 def wait_for_page_refresh(very_first_match_date):
     while True:
+        time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
         try:
             last_10_matches = driver.find_elements_by_css_selector("tr[id^='page_team_1_block_team_matches_summary_7']")
             if very_first_match_date != last_10_matches[0].find_element_by_class_name("full-date").text:
-                print("New data present on page.")
+                print("{} - New data present on page.".format(time_now), file=open('scraper_stdout.log'))
                 very_first_match_date = last_10_matches[0].find_element_by_class_name("full-date").text
                 return last_10_matches, very_first_match_date
             else:
-                print("Page hasn't refreshed yet.")
+                print("{} - Page hasn't refreshed yet.".format(time_now), file=open('scraper_stdout.log'))
                 time.sleep(0.5)    
         except Exception as e:
-            print("Encountered Exception while in wait_for_page_refresh function:\n{}".format(repr(e)))            
+            print("{} - {}".format(time_now, repr(e)), file=open('scraper_error.log', 'a'))
 
 all_matches_unclean = {k: [] for k,v in potential_leagues.items()}
 team_done = None
@@ -109,7 +111,8 @@ elif pd.read_csv(clean_csv).size > 2:
     for league_id in list(potential_leagues.keys()):
         if league_id != league:
             del potential_leagues[league_id]
-            print("Removed: ", league_id)
+            time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
+            print("{} - Removed: {}".format(time_now, league_id), file=open('scraper_stdout.log'))
         else:
             break
 
@@ -194,7 +197,9 @@ for league_id,league_url in potential_leagues.items():
             stats = driver.find_element_by_xpath("//div//iframe[@src='/charts/statsplus/{}/']".format(match_id))
         except Exception as e:
             time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
-            print("{} - Match didn't have stats table, skipping. Here's the original error:".format(time_now), file=open('scraper_error.log', 'a'))
+            match_date = str(datetime.utcfromtimestamp(unique_match['match_time'] / 1000.0).strftime("%Y-%m-%d"))
+            print("{} - {} - {} at {} didn't have stats table, skipping. Here's the original error:"
+                    .format(time_now, unique_match['home_team'], unique_match['away_team'], match_date), file=open('scraper_error.log', 'a'))
             print(repr(e), file=open('scraper_error.log', 'a'))
             continue
         driver.switch_to.frame(stats)
