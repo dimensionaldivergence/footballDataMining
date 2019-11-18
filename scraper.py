@@ -121,8 +121,8 @@ elif pd.read_csv(clean_csv).size > 2:
 
 # Start looping through the filtered (or original) league dict.
 for league_id,league_url in potential_leagues.items():    
-    if league_id == 'fr_ligue2':
-        break
+    #if league_id == 'fr_ligue2':
+        #break
     driver = webdriver.Firefox(firefox_profile=firefox_profile)
     driver.get(league_url)
     
@@ -177,11 +177,10 @@ for league_id,league_url in potential_leagues.items():
                     writer.writerow([league_id, match_time_ms, match_url, home_team, away_team, full_time_score])
             
             # Click on previous and be kind to soccerway..
-            button = driver.find_element_by_class_name("previous ").click()
+            button = driver.find_element_by_xpath("//a[@id='page_team_1_block_team_matches_summary_7_previous']").click()
             time.sleep(0.5)
         
     # After looping through all the teams in a league, remove duplicates and then proceed
-    league_id = 'fr_ligue1'
     # Read file first:
     all_matches_unclean = pd.read_csv(unclean_csv)
     all_matches_clean = all_matches_unclean[all_matches_unclean['league_id'] == league_id].drop_duplicates()
