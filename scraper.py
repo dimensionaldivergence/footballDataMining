@@ -2,25 +2,64 @@
 from datetime import datetime, timezone
 import pytz
 from selenium import webdriver
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+#from selenium.webdriver.support.ui import WebDriverWait
+#from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import *
 from selenium.webdriver.common.keys import Keys
+#from selenium.webdriver.common.action_chains import ActionChains
+#from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+from selenium.webdriver.firefox.options import Options
+#from selenium.webdriver.chrome.options import Options
 import time
 import copy
 import json,csv
 import os
-from collections import OrderedDict
 import pandas as pd
 
-firefox_profile = webdriver.FirefoxProfile()
-firefox_profile.set_preference('permissions.default.image', 2)
-firefox_profile.set_preference('dom.ipc.plugins.enabled.libflashplayer.so', 'false')
-firefox_profile.set_preference("browser.cache.disk.enable", False)
-firefox_profile.set_preference("browser.cache.memory.enable", False)
-firefox_profile.set_preference("browser.cache.offline.enable", False)
-firefox_profile.set_preference("network.http.use-cache", False) 
+
+
+#2019-11-19 05:50:40 - SessionNotCreatedException('Tried to run command without establishing a connection', None, None)
+# --> marionette False --> Doesn't work
+#2019-11-19 05:50:21 - ElementClickInterceptedException('Element <a id="page_team_1_block_team_matches_summary_7_previous" class="previous "> is not clickable at point (612.0833587646484,334.75) because another element <div id="div-gpt-ad-1478706130315-4"> obscures it', None, None)
+# sudo apt-get install openssl gem ruby xvfb
+# sudo pip3 install pyvirtualdisplay
+# 2019-11-19 16:49:06 - MoveTargetOutOfBoundsException('(623.0833587646484, 757.875) is out of bounds of viewport width (720) and height (466)', None, None)
+# fbset -s      # raspbian get resolution   720x480
+# 2019-11-19 17:08:07 - NoSuchElementException("Unable to locate element: //a[@id='page_team_1_block_team_matches_summary_7_previous']", None, None)
+
+# 2019-11-19 20:12:28 - ElementNotInteractableException('Element <button class="qc-cmp-button"> could not be scrolled into view', None, None)
+
+# File "./scraper.py", line 240, in <module> driver.get(unique_match['match_url'])
+# selenium.common.exceptions.WebDriverException: Message: Failed to decode response from marionette  --> Caused by:
+# This bug is related to zombie processes that hangs after driver.quit(), when you open many browsers one task after 
+# another, your machine will run out of memory or out of PIDs, that is happening on docker for chromedriver and geckodriver.
+
+# File "./scraper.py", line 237, in <module> driver.get(unique_match['match_url'])   --> Fixed
+# selenium.common.exceptions.SessionNotCreatedException: Message: Tried to run command without establishing a connection
+
+# FileNotFoundError: [Errno 2] No such file or directory: '/tmp/tmpe_zjqvbz/webdriver-py-profilecopy/user.js'
+# Possible solution: https://stackoverflow.com/questions/6652819/selenium-firefoxprofile-fails-with-not-found-exception
+# Modifying selenium/webdriver/firefox/firefox_profile.py and add try-except
+# /usr/local/lib/python3.7/dist-packages/selenium/webdriver/firefox/firefox_profile.py --> Already done...
+
+
+firefox_profile = webdriver.FirefoxProfile('profile.default')  # Saved profile from tmp folder...
+#firefox_profile.set_preference('permissions.default.image', 2)
+#firefox_profile.set_preference('dom.ipc.plugins.enabled.libflashplayer.so', 'false')
+#firefox_profile.set_preference("browser.cache.disk.enable", False)
+#firefox_profile.set_preference("browser.cache.memory.enable", False)
+#firefox_profile.set_preference("browser.cache.offline.enable", False)
+#firefox_profile.set_preference("network.http.use-cache", False)
+#firefox_profile.set_preference("browser.tabs.warnOnClose", False)
+##firefox_profile.add_extension('adblock_plus-3.6.3-an fx.xpi')
+##firefox_profile.set_preference("extensions.adblockplus.currentVersion", "3.6.3")
+
+# =============================================================================
+# from pyvirtualdisplay import Display
+# display = Display(visible=0, size=(1920, 1080))
+# display.start()
+# =============================================================================
 
 potential_leagues = {'fr_ligue1': 'https://us.soccerway.com/national/france/ligue-1/20192020/regular-season/r53638/',
                      'fr_ligue2': 'https://us.soccerway.com/national/france/ligue-2/20192020/regular-season/r54072/',
@@ -71,26 +110,28 @@ def close_popup(driver):
             break
         except Exception as e:
             time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
-            print("{} - {}".format(time_now, repr(e)), file=open('scraper_error.log', 'a'))
+            print("{} - {}".format(time_now, repr(e)), file=open('error_log', 'a'))
             time.sleep(0.5)
 
 def wait_for_page_refresh(very_first_match_date):
     while True:
+        time.sleep(0.01)
         time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
         try:
             last_10_matches = driver.find_elements_by_css_selector("tr[id^='page_team_1_block_team_matches_summary_7']")
             if very_first_match_date != last_10_matches[0].find_element_by_class_name("full-date").text:
-                print("{} - New data present on page.".format(time_now), file=open('scraper_stdout.log', 'a'))
+                print("{} - New data present on page.".format(time_now), file=open('stdout.log', 'a'))
                 very_first_match_date = last_10_matches[0].find_element_by_class_name("full-date").text
                 return last_10_matches, very_first_match_date
             else:
-                print("{} - Page hasn't refreshed yet.".format(time_now), file=open('scraper_stdout.log', 'a'))
+                print("{} - Page hasn't refreshed yet.".format(time_now), file=open('stdout.log', 'a'))
                 time.sleep(0.5)    
         except Exception as e:
-            print("{} - {}".format(time_now, repr(e)), file=open('scraper_error.log', 'a'))
+            print("{} - {}".format(time_now, repr(e)), file=open('error_log', 'a'))
+        time.sleep(0.01)
 
 team_done = None
-run_once = False
+last_match_url = None
 clean_csv = 'all_matches_clean.csv'
 unclean_csv = 'all_matches_unclean.csv'
 
@@ -103,19 +144,21 @@ if not os.path.isfile(unclean_csv):
 if not os.path.isfile(clean_csv):
     with open(clean_csv, 'a') as f:
         writer = csv.writer(f)
-        writer.writerow(matches_clean_headers)    
-elif pd.read_csv(clean_csv).size > 2:
-    clean_unfinished_data = pd.read_csv(clean_csv)
-    last_data = clean_unfinished_data.iloc[-1,3:5]
-    last_data2 = clean_unfinished_data.iloc[-2,3:5]
-    league = clean_unfinished_data.iloc[-1,0]     # All leagues before this are supposed to be ready.
+        writer.writerow(matches_clean_headers) 
+
+"""   
+if pd.read_csv(unclean_csv).size > 2:
+    unclean_unfinished_data = pd.read_csv(unclean_csv)
+    last_data = unclean_unfinished_data.iloc[-1,3:5]
+    last_data2 = unclean_unfinished_data.iloc[-2,3:5]
+    league = unclean_unfinished_data.iloc[-1,0]     # All leagues before this are supposed to be ready.
     team_done = list(set(last_data) & set(last_data2))[0]
-    # Remove already done leagues from the dict
+    # Remove already done leagues from the dict (unclean)
     for league_id in list(potential_leagues.keys()):
         if league_id != league:
             del potential_leagues[league_id]
             time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
-            print("{} - Removed: {}".format(time_now, league_id), file=open('scraper_stdout.log', 'a'))
+            print("{} - Removed: {}".format(time_now, league_id), file=open('stdout.log', 'a'))
         else:
             break
 
@@ -123,21 +166,28 @@ elif pd.read_csv(clean_csv).size > 2:
 for league_id,league_url in potential_leagues.items():    
     #if league_id == 'fr_ligue2':
         #break
-    driver = webdriver.Firefox(firefox_profile=firefox_profile)
-    driver.get(league_url)
+    while True:
+        time.sleep(0.01)
+        try:
+            driver = webdriver.Firefox(firefox_profile=webdriver.FirefoxProfile('profile.default'))
+            driver.get(league_url)
+            break
+        except WebDriverException as e:
+            time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
+            print("{} - {}".format(time_now, repr(e)), file=open('error_log', 'a'))
+        time.sleep(0.01)
     
     # Closing pop-up about accepting cookies
-    if not run_once:
-        close_popup(driver)
-        run_once = True
+    close_popup(driver)
 
     # Remove already done teams from the list
-    teams = driver.find_element_by_xpath("//div[@id='page_competition_1_block_competition_tables_7']").find_elements_by_class_name("team_rank")
+    teams = driver.find_element_by_xpath("//div[starts-with(@id, 'page_competition_1_block_competition_tables_')]").find_elements_by_class_name("team_rank")
     if team_done:
         for team in teams[:]:
             if team.find_element_by_class_name('team').text != team_done:
                 teams.remove(team)
             else:
+                team_done = None    # Resetting back to None so our script will not remove all matches from next leagues
                 break
     teams_urls = [team.find_element_by_class_name('team').find_element_by_tag_name('a').get_attribute('href') for team in teams]
     
@@ -145,13 +195,20 @@ for league_id,league_url in potential_leagues.items():
     for team_url in teams_urls:
         #if team_url == teams_urls[1]:
             #break
-        driver.get(team_url)
+        try:
+            driver.get(team_url)
+        except Exception as e:
+            print("{} - {}".format(time_now, repr(e)), file=open('error_log', 'a'))
+            driver = webdriver.Firefox(firefox_profile=webdriver.FirefoxProfile('profile.default'))
+            driver.get(team_url)
+            close_popup(driver)
 
         # Initialize some variables
         very_first_match_date = None
         first_match_reached = False
         
         while not first_match_reached:
+            time.sleep(0.01)
             # Checking if new data present on page (either in the beginning or after button click)
             last_10_matches, very_first_match_date = wait_for_page_refresh(very_first_match_date)
             
@@ -175,25 +232,91 @@ for league_id,league_url in potential_leagues.items():
                 with open(unclean_csv, 'a') as f:
                     writer = csv.writer(f)
                     writer.writerow([league_id, match_time_ms, match_url, home_team, away_team, full_time_score])
-            
+
             # Click on previous and be kind to soccerway..
-            button = driver.find_element_by_xpath("//a[@id='page_team_1_block_team_matches_summary_7_previous']").click()
-            time.sleep(0.5)
-        
+            while True:
+                time.sleep(0.01)
+                time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
+                try:
+                    button = driver.find_element_by_xpath("//a[@id='page_team_1_block_team_matches_summary_7_previous']")
+                    if not "disabled" in button.get_attribute('class'):
+                        button.click()
+                        break
+                    else: # First match reached ahead of time, due to disabled 'previous' button
+                        first_match_reached = True
+                        break
+                except Exception as e:
+                    print("{} - {}".format(time_now, repr(e)), file=open('error_log', 'a'))
+                time.sleep(0.01)
+            time.sleep(0.01)
+                    
+        # Close browser so that the computer can recover and open fresh
+        driver.close()
+        driver.quit()
+        time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
+        print("{} - Closed the browser to start next round".format(time_now), file=open('stdout.log', 'a'))
+        time.sleep(0.5)
+"""
+
+
+# Finding league to continue from
+if pd.read_csv(clean_csv).size > 2:
+    clean_unfinished_data = pd.read_csv(clean_csv)
+    last_teams = clean_unfinished_data.iloc[-1,3:5]
+    last_teams2 = clean_unfinished_data.iloc[-2,3:5]
+    league = clean_unfinished_data.iloc[-1,0]     # All leagues before this are supposed to be ready.
+    team_done = list(set(last_teams) & set(last_teams2))[0]
+    # Remove already done leagues from the dict (unclean)
+    for league_id in list(potential_leagues.keys()):
+        if league_id != league:
+            del potential_leagues[league_id]
+            time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
+            print("{} - Removed: {}".format(time_now, league_id), file=open('stdout.log', 'a'))
+        else:
+            # When we got to our current league, find match to continue from
+            last_match_url = clean_unfinished_data.iloc[-1,2]
+            break
+
+# Start looping through the filtered (or original) league dict.
+for league_id,league_url in potential_leagues.items():    
+    #if league_id == 'fr_ligue2':
+        #break
     # After looping through all the teams in a league, remove duplicates and then proceed
-    # Read file first:
     all_matches_unclean = pd.read_csv(unclean_csv)
     all_matches_clean = all_matches_unclean[all_matches_unclean['league_id'] == league_id].drop_duplicates()
+    
+    # Finding match to continue from
+    if last_match_url:
+        for idx, match in all_matches_clean.iterrows():
+            if match['match_url'] != last_match_url:
+                # While we haven't reached last match, keep removing matches
+                all_matches_clean = all_matches_clean.drop([idx])
+            else:
+                # When we reached the last match, remove it, and break out of loop
+                all_matches_clean = all_matches_clean.drop([idx])
+                last_match_url = None
+                break
+
+    driver = webdriver.Firefox(firefox_profile=webdriver.FirefoxProfile('profile.default'))
+    pop_up = None
 
     # Loop through all matches in filtered list and gather extra data.
     for idx, unique_match in all_matches_clean.iterrows():
         #if idx == 1:
             #break
         driver.get(unique_match['match_url'])
+        if not pop_up:
+            close_popup(driver)
+            pop_up = True
         match_id = unique_match['match_url'].split('/')[-2]
-        half_time = driver.find_element_by_xpath("//dl[dt='Half-time']/dd[1]").text
-        unique_match = unique_match.append(pd.Series({"half_time_score": half_time}))
-        
+        try:
+            half_time = driver.find_element_by_xpath("//dl[dt='Half-time']/dd[1]").text
+            unique_match = unique_match.append(pd.Series({"half_time_score": half_time}))
+        except Exception as e:
+            time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
+            print("{} - Skipping match: {}, because: {}".format(time_now, unique_match['match_url'], repr(e)), file=open('error_log', 'a'))
+            continue
+
         # Switch focus to stats table:        
         try:
             stats = driver.find_element_by_xpath("//div//iframe[@src='/charts/statsplus/{}/']".format(match_id))
@@ -201,8 +324,8 @@ for league_id,league_url in potential_leagues.items():
             time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
             match_date = str(datetime.utcfromtimestamp(unique_match['match_time'] / 1000.0).strftime("%Y-%m-%d"))
             print("{} - {} - {} at {} didn't have stats table, skipping. Here's the original error:"
-                    .format(time_now, unique_match['home_team'], unique_match['away_team'], match_date), file=open('scraper_error.log', 'a'))
-            print(repr(e), file=open('scraper_error.log', 'a'))
+                    .format(time_now, unique_match['home_team'], unique_match['away_team'], match_date), file=open('error_log', 'a'))
+            print(repr(e), file=open('error_log', 'a'))
             continue
         driver.switch_to.frame(stats)
         # Gather stats
@@ -229,7 +352,15 @@ for league_id,league_url in potential_leagues.items():
             writer = csv.writer(f)
             writer.writerow(unique_match.values[:])
     
+    # Close browser so that the computer can recover and open fresh
+    driver.close()
+    driver.quit()
+    time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
+    print("{} - Closed the browser to start next round (clean stage)".format(time_now), file=open('stdout.log', 'a'))
+    time.sleep(0.5)
+
 driver.close()
+driver.quit()
 
 
 
