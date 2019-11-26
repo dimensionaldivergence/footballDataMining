@@ -258,6 +258,9 @@ for league_id,league_url in potential_leagues.items():
         time.sleep(0.5)
 """
 
+# Doing things the faster way
+import requests
+from lxml import etree
 
 # Finding league to continue from
 if pd.read_csv(clean_csv).size > 2:
@@ -284,7 +287,7 @@ for league_id,league_url in potential_leagues.items():
     # After looping through all the teams in a league, remove duplicates and then proceed
     all_matches_unclean = pd.read_csv(unclean_csv)
     all_matches_clean = all_matches_unclean[all_matches_unclean['league_id'] == league_id].drop_duplicates()
-    
+
     # Finding match to continue from
     if last_match_url:
         for idx, match in all_matches_clean.iterrows():
@@ -297,29 +300,27 @@ for league_id,league_url in potential_leagues.items():
                 last_match_url = None
                 break
 
-    driver = webdriver.Firefox(firefox_profile=webdriver.FirefoxProfile('profile.default'))
-    pop_up = None
-
     # Loop through all matches in filtered list and gather extra data.
     for idx, unique_match in all_matches_clean.iterrows():
         #if idx == 1:
             #break
-        driver.get(unique_match['match_url'])
-        if not pop_up:
-            close_popup(driver)
-            pop_up = True
+        #Need to disable verifying ssl.Be careful!
+        r = requests.get(unique_match['match_url'],verify=False)
+        dom = etree.HTML(r.text)
         match_id = unique_match['match_url'].split('/')[-2]
         try:
-            half_time = driver.find_element_by_xpath("//dl[dt='Half-time']/dd[1]").text
+            half_time = dom.xpath("//dl[dt='Half-time']/dd[1]/text()")[0]
             unique_match = unique_match.append(pd.Series({"half_time_score": half_time}))
         except Exception as e:
             time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
-            print("{} - Skipping match: {}, because: {}".format(time_now, unique_match['match_url'], repr(e)), file=open('error_log', 'a'))
+            print("{} - Skipping match: {}, because: {} (not having half-time score)"
+                  .format(time_now, unique_match['match_url'], repr(e)), file=open('error_log', 'a'))
             continue
 
-        # Switch focus to stats table:        
+        # Get contents of the stats table:
         try:
-            stats = driver.find_element_by_xpath("//div//iframe[@src='/charts/statsplus/{}/']".format(match_id))
+            stats = requests.get('https://us.soccerway.com/charts/statsplus/{}/'.format(match_id),verify=False)
+            inner_dom = etree.HTML(stats.text)
         except Exception as e:
             time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
             match_date = str(datetime.utcfromtimestamp(unique_match['match_time'] / 1000.0).strftime("%Y-%m-%d"))
@@ -327,41 +328,31 @@ for league_id,league_url in potential_leagues.items():
                     .format(time_now, unique_match['home_team'], unique_match['away_team'], match_date), file=open('error_log', 'a'))
             print(repr(e), file=open('error_log', 'a'))
             continue
-        driver.switch_to.frame(stats)
         # Gather stats
-        home_corners = driver.find_element_by_xpath("//td[text()='Corners']/preceding-sibling::td").text
-        away_corners = driver.find_element_by_xpath("//td[text()='Corners']/following-sibling::td").text
+        home_corners = str(inner_dom.xpath("//td[text()='Corners']/preceding-sibling::td/text()")[0])
+        away_corners = str(inner_dom.xpath("//td[text()='Corners']/following-sibling::td/text()")[0])
         unique_match = unique_match.append(pd.Series({"corners": "{} - {}".format(home_corners, away_corners)}))
         
-        home_offsides = driver.find_element_by_xpath("//td[text()='Offsides']/preceding-sibling::td").text
-        away_offsides = driver.find_element_by_xpath("//td[text()='Offsides']/following-sibling::td").text
+        home_offsides = str(inner_dom.xpath("//td[text()='Offsides']/preceding-sibling::td/text()")[0])
+        away_offsides = str(inner_dom.xpath("//td[text()='Offsides']/following-sibling::td/text()")[0])
         unique_match = unique_match.append(pd.Series({"offsides": "{} - {}".format(home_offsides, away_offsides)}))
         
-        home_shots_on_target = driver.find_element_by_xpath("//td[text()='Shots on target']/preceding-sibling::td").text
-        away_shots_on_target = driver.find_element_by_xpath("//td[text()='Shots on target']/following-sibling::td").text
+        home_shots_on_target = str(inner_dom.xpath("//td[text()='Shots on target']/preceding-sibling::td/text()")[0])
+        away_shots_on_target = str(inner_dom.xpath("//td[text()='Shots on target']/following-sibling::td/text()")[0])
         unique_match = unique_match.append(pd.Series({"shots_on_target": "{} - {}".format(home_shots_on_target, away_shots_on_target)}))
         
-        home_fouls = driver.find_element_by_xpath("//td[text()='Fouls']/preceding-sibling::td").text
-        away_fouls = driver.find_element_by_xpath("//td[text()='Fouls']/following-sibling::td").text
+        home_fouls = str(inner_dom.xpath("//td[text()='Fouls']/preceding-sibling::td/text()")[0])
+        away_fouls = str(inner_dom.xpath("//td[text()='Fouls']/following-sibling::td/text()")[0])
         unique_match = unique_match.append(pd.Series({"fouls": "{} - {}".format(home_fouls, away_fouls)}))
-        
-        # Switch focus back
-        driver.switch_to.default_content()
         
         with open(clean_csv, 'a') as f:
             writer = csv.writer(f)
             writer.writerow(unique_match.values[:])
     
-    # Close browser so that the computer can recover and open fresh
-    driver.close()
-    driver.quit()
+    # Finished with current league, log it.
     time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
-    print("{} - Closed the browser to start next round (clean stage)".format(time_now), file=open('stdout.log', 'a'))
+    print("{} - Finished dealing with league '{}' (clean stage)".format(time_now, league_id), file=open('stdout.log', 'a'))
     time.sleep(0.5)
-
-driver.close()
-driver.quit()
-
 
 
     
