@@ -5,6 +5,8 @@ import copy
 import json,csv
 import os
 import pandas as pd
+import numpy as np
+import traceback
 
 # Doing things the faster way
 import urllib3
@@ -265,3 +267,118 @@ def browse_matches_for_stats():
         time_now = datetime.utcnow().replace(tzinfo=pytz.UTC).strftime("%Y-%m-%d %H:%M:%S")
         print("{} - Finished dealing with league '{}' (clean stage)".format(time_now, league_id), file=open('stdout.log', 'a'))
         time.sleep(0.5)
+
+"""
+full_time_score_frequencies = all_matches_clean['full_time_score'].value_counts()
+full_time_score_freq_perc = full_time_score_frequencies / full_time_score_frequencies.sum()
+half_time_score_frequencies = all_matches_clean['half_time_score'].value_counts()
+half_time_score_freq_perc = half_time_score_frequencies / half_time_score_frequencies.sum()
+
+matches_draw = np.sum(a['full_time_score'].isin(["0 - 0", "1 - 1", "2 - 2", "3 - 3"]))
+matches_10 = np.sum(a['full_time_score'].isin(["1 - 0", "2 - 1", "3 - 2", "4 - 3"]))
+matches_01 = np.sum(a['full_time_score'].isin(["0 - 1", "1 - 2", "2 - 3", "3 - 4"]))
+
+full_times_scores = []
+half_times_scores = []
+for league_id in potential_leagues:
+    current_league_matches = all_matches_clean[all_matches_clean['league_id'] == league_id]
+    current_league_full_time_score_frequencies = current_league_matches['full_time_score'].value_counts()
+    current_league_full_time_score_frequencies = current_league_full_time_score_frequencies.rename(league_id)
+    full_times_scores.append(current_league_full_time_score_frequencies)
+    
+    current_league_half_time_score_frequencies = current_league_matches['half_time_score'].value_counts()
+    current_league_half_time_score_frequencies = current_league_half_time_score_frequencies.rename(league_id)
+    half_times_scores.append(current_league_half_time_score_frequencies)
+    
+full_times_scores = pd.concat(full_times_scores, axis=1, sort=False)
+half_times_scores = pd.concat(half_times_scores, axis=1, sort=False)
+"""
+
+
+def extract_scores(match, matches_before, stat_to_extract, team):
+    if team == 'home_team':
+        return sum([int(m[stat_to_extract].strip().split()[0]) \
+                   if m[team] == match[team] \
+                   else int(m[stat_to_extract].strip().split()[-1]) \
+                   for i, m in matches_before.iterrows()])
+    else: # away_team
+        return sum([int(m[stat_to_extract].strip().split()[-1]) \
+                   if m[team] == match[team] \
+                   else int(m[stat_to_extract].strip().split()[0]) \
+                   for i, m in matches_before.iterrows()])
+
+
+def prepare_data_for_ML():
+    data_for_ML = []
+    matches_behind = 3
+    all_matches_clean = pd.read_csv('all_matches_clean.csv')
+    for league_id in potential_leagues:
+        current_league_matches = all_matches_clean[all_matches_clean['league_id'] == league_id].sort_values('match_time').reset_index(drop=True)        
+        for idx, match in current_league_matches.iterrows():
+            try:
+                # Find all matches having any of the current teams from before its match_time
+                matches_before = current_league_matches[current_league_matches['match_time'] < match['match_time']]
+                matches_before_home_team = matches_before[(matches_before['home_team'] == match['home_team']) | \
+                                                          (matches_before['away_team'] == match['home_team'])][-matches_behind:]
+                matches_before_away_team = matches_before[(matches_before['home_team'] == match['away_team']) | \
+                                                          (matches_before['away_team'] == match['away_team'])][-matches_behind:]
+                if len(matches_before_home_team) == matches_behind and len(matches_before_away_team) == matches_behind:
+                    # Home team stats
+                    home_team_goals_full_time = extract_scores(match, matches_before_home_team, 'full_time_score', 'home_team')
+                    home_team_goals_half_time = extract_scores(match, matches_before_home_team, 'half_time_score', 'home_team')
+                    home_team_corners = extract_scores(match, matches_before_home_team, 'corners', 'home_team')
+                    home_team_offsides = extract_scores(match, matches_before_home_team, 'offsides', 'home_team')
+                    home_team_shots_on_target = extract_scores(match, matches_before_home_team, 'shots_on_target', 'home_team')
+                    home_team_fouls = extract_scores(match, matches_before_home_team, 'fouls', 'home_team')
+                    
+                    # Away team stats
+                    away_team_goals_full_time = extract_scores(match, matches_before_away_team, 'full_time_score', 'away_team')
+                    away_team_goals_half_time = extract_scores(match, matches_before_away_team, 'half_time_score', 'away_team')
+                    away_team_corners = extract_scores(match, matches_before_away_team, 'corners', 'away_team')
+                    away_team_offsides = extract_scores(match, matches_before_away_team, 'offsides', 'away_team')
+                    away_team_shots_on_target = extract_scores(match, matches_before_away_team, 'shots_on_target', 'away_team')
+                    away_team_fouls = extract_scores(match, matches_before_away_team, 'fouls', 'away_team')
+                else:
+                    continue
+                
+                if int(match['full_time_score'].strip().split()[0]) - int(match['full_time_score'].strip().split()[-1]) == 0:
+                    match_outcome_full_time = 0
+                elif int(match['full_time_score'].strip().split()[0]) - int(match['full_time_score'].strip().split()[-1]) == 1:
+                    match_outcome_full_time = 1
+                elif int(match['full_time_score'].strip().split()[0]) - int(match['full_time_score'].strip().split()[-1]) == -1:
+                    match_outcome_full_time = -1
+                elif int(match['full_time_score'].strip().split()[0]) - int(match['full_time_score'].strip().split()[-1]) == 2:
+                    match_outcome_full_time = 2
+                elif int(match['full_time_score'].strip().split()[0]) - int(match['full_time_score'].strip().split()[-1]) == -2:
+                    match_outcome_full_time = -2
+                else:
+                    match_outcome_full_time = 3
+                    
+                if int(match['half_time_score'].strip().split()[0]) - int(match['half_time_score'].strip().split()[-1]) == 0:
+                    match_outcome_half_time = 0
+                elif int(match['half_time_score'].strip().split()[0]) - int(match['half_time_score'].strip().split()[-1]) == 1:
+                    match_outcome_half_time = 1
+                elif int(match['half_time_score'].strip().split()[0]) - int(match['half_time_score'].strip().split()[-1]) == -1:
+                    match_outcome_half_time = -1
+                elif int(match['half_time_score'].strip().split()[0]) - int(match['half_time_score'].strip().split()[-1]) == 2:
+                    match_outcome_half_time = 2
+                elif int(match['half_time_score'].strip().split()[0]) - int(match['half_time_score'].strip().split()[-1]) == -2:
+                    match_outcome_half_time = -2
+                else:
+                    match_outcome_half_time = 3
+                
+                data_for_ML.append(pd.Series({'league_id': match.league_id, 'match_time': match.match_time, 'match_url': match.match_url,
+                                              'home_team': match.home_team, 'away_team': match.away_team, 'full_time_score': match.full_time_score,
+                                              'half_time_score': match.half_time_score, 
+                                              'home_team_goals_full_time': home_team_goals_full_time, 'home_team_goals_half_time': home_team_goals_half_time,
+                                              'home_team_corners': home_team_corners, 'home_team_offsides': home_team_offsides, 
+                                              'home_team_shots_on_target': home_team_shots_on_target, 'home_team_fouls': home_team_fouls,
+                                              'away_team_goals_full_time': away_team_goals_full_time, 'away_team_goals_half_time': away_team_goals_half_time,
+                                              'away_team_corners': away_team_corners, 'away_team_offsides': away_team_offsides, 
+                                              'away_team_shots_on_target': away_team_shots_on_target, 'away_team_fouls': away_team_fouls,
+                                              'match_outcome_full_time': match_outcome_full_time, 'match_outcome_half_time': match_outcome_half_time}))
+            except Exception:
+                print(traceback.print_exc())
+        
+    data_for_ML_csv = pd.concat(data_for_ML, axis=1, sort=False).transpose()
+    data_for_ML_csv.to_csv('matches_ready_for_ML.csv', index=False)

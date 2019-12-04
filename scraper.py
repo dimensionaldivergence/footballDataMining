@@ -2,7 +2,8 @@
 from lib_scraper import *
 
 
-browse_matches_for_stats()
+#browse_matches_for_stats()
+prepare_data_for_ML()
     
 """
 TODO list:
