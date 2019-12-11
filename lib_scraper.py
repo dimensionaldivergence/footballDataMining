@@ -429,6 +429,9 @@ def convert_data_for_ML(datafile, strategy="diff"):
     """
     dataset = pd.read_csv(datafile)
     dataset_new = copy.deepcopy(dataset)
+    #####################
+    ###### Useless ######
+    #####################
     if strategy == "diff":
         goals_full_time_diff = dataset.home_team_goals_full_time - dataset.away_team_goals_full_time
         goals_full_time_diff = goals_full_time_diff.rename("home_team_goals_full_time")
