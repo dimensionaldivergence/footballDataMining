@@ -308,9 +308,64 @@ def extract_scores(match, matches_before, stat_to_extract, team):
                    for i, m in matches_before.iterrows()])
 
 
-def prepare_data_for_ML():
+def evaluate_score(match, categories):
+    """
+    Evaluate the outcome based on the score for the match.
+    For "traditional" the outcomes are as follows:
+    0   -> "Draw"
+    1   -> "Home win"
+    2   -> "Away win"
+    For "handicap" the outcomes are as follows:
+    0   -> "Draw"
+    1   -> "Home win by 1 goal"
+    2   -> "Away win by 1 goal"
+    3   -> "Home win by 2 goals"
+    4   -> "Away win by 2 goals"
+    5   -> "Any other score"
+    :param match:               pd.DataFrame instance containing all the information for a match
+    :param categories:          str, one of ["traditional","handicap"] meaning "Home | Draw | Away" or
+                                     "Home by 1 | Draw | Away by 1 | Home by 2 | Away by 2 | Else".
+                                     It will determine the number of outcomes
+    :return:                    match_outcome_full_time, match_outcome_half_time
+    """
+    full_time_difference = int(match['full_time_score'].strip().split()[0]) - int(match['full_time_score'].strip().split()[-1])
+    half_time_difference = int(match['half_time_score'].strip().split()[0]) - int(match['half_time_score'].strip().split()[-1])
+    if categories == "handicap":
+        if full_time_difference == 0: match_outcome_full_time = 0
+        elif full_time_difference == 1: match_outcome_full_time = 1
+        elif full_time_difference == -1: match_outcome_full_time = 2
+        elif full_time_difference == 2: match_outcome_full_time = 3
+        elif full_time_difference == -2: match_outcome_full_time = 4
+        else: match_outcome_full_time = 5
+            
+        if half_time_difference == 0: match_outcome_half_time = 0
+        elif half_time_difference == 1: match_outcome_half_time = 1
+        elif half_time_difference == -1: match_outcome_half_time = 2
+        elif half_time_difference == 2: match_outcome_half_time = 3
+        elif half_time_difference == -2: match_outcome_half_time = 4
+        else: match_outcome_half_time = 5
+    else: # "traditional"
+        if full_time_difference == 0: match_outcome_full_time = 0
+        elif full_time_difference > 0: match_outcome_full_time = 1
+        else: match_outcome_full_time = 2
+            
+        if half_time_difference == 0: match_outcome_half_time = 0
+        elif half_time_difference > 0: match_outcome_half_time = 1
+        else: match_outcome_half_time = 2
+    
+    return match_outcome_full_time, match_outcome_half_time
+
+def prepare_data_for_ML(matches_behind, categories):
+    """
+    Process all the gathered football matches and generate statistics of previous x matches,
+    where x is the "matches_behind" integer parameter.
+    :param matches_behind:      int, number of matches behind current match to take stats from
+    :param categories:          str, one of ["traditional","handicap"] meaning "Home | Draw | Away" or
+                                     "Home by 1 | Draw | Away by 1 | Home by 2 | Away by 2 | Else".
+                                     It will determine the number of outcomes
+    :return:                    None
+    """
     data_for_ML = []
-    matches_behind = 3
     all_matches_clean = pd.read_csv('all_matches_clean.csv')
     for league_id in potential_leagues:
         current_league_matches = all_matches_clean[all_matches_clean['league_id'] == league_id].sort_values('match_time').reset_index(drop=True)        
@@ -341,31 +396,7 @@ def prepare_data_for_ML():
                 else:
                     continue
                 
-                if int(match['full_time_score'].strip().split()[0]) - int(match['full_time_score'].strip().split()[-1]) == 0:
-                    match_outcome_full_time = 0
-                elif int(match['full_time_score'].strip().split()[0]) - int(match['full_time_score'].strip().split()[-1]) == 1:
-                    match_outcome_full_time = 1
-                elif int(match['full_time_score'].strip().split()[0]) - int(match['full_time_score'].strip().split()[-1]) == -1:
-                    match_outcome_full_time = -1
-                elif int(match['full_time_score'].strip().split()[0]) - int(match['full_time_score'].strip().split()[-1]) == 2:
-                    match_outcome_full_time = 2
-                elif int(match['full_time_score'].strip().split()[0]) - int(match['full_time_score'].strip().split()[-1]) == -2:
-                    match_outcome_full_time = -2
-                else:
-                    match_outcome_full_time = 3
-                    
-                if int(match['half_time_score'].strip().split()[0]) - int(match['half_time_score'].strip().split()[-1]) == 0:
-                    match_outcome_half_time = 0
-                elif int(match['half_time_score'].strip().split()[0]) - int(match['half_time_score'].strip().split()[-1]) == 1:
-                    match_outcome_half_time = 1
-                elif int(match['half_time_score'].strip().split()[0]) - int(match['half_time_score'].strip().split()[-1]) == -1:
-                    match_outcome_half_time = -1
-                elif int(match['half_time_score'].strip().split()[0]) - int(match['half_time_score'].strip().split()[-1]) == 2:
-                    match_outcome_half_time = 2
-                elif int(match['half_time_score'].strip().split()[0]) - int(match['half_time_score'].strip().split()[-1]) == -2:
-                    match_outcome_half_time = -2
-                else:
-                    match_outcome_half_time = 3
+                match_outcome_full_time, match_outcome_half_time = evaluate_score(match, categories=categories)                    
                 
                 data_for_ML.append(pd.Series({'league_id': match.league_id, 'match_time': match.match_time, 'match_url': match.match_url,
                                               'home_team': match.home_team, 'away_team': match.away_team, 'full_time_score': match.full_time_score,
@@ -381,4 +412,67 @@ def prepare_data_for_ML():
                 print(traceback.print_exc())
         
     data_for_ML_csv = pd.concat(data_for_ML, axis=1, sort=False).transpose()
-    data_for_ML_csv.to_csv('matches_ready_for_ML.csv', index=False)
+    data_for_ML_csv.to_csv('matches_ready_for_ML_{}_{}.csv'.format(matches_behind, categories), index=False)
+
+
+def convert_data_for_ML(datafile, strategy="diff"):
+    """
+    Manipulate data read from csv files meant for machine learning so that we can
+    increase the accuracy of the machine learning models. i.e. use the diff of two 
+    independent input parameters and create a new, hopefully more representative one:
+    home_team_corners: 5, away_team_corners: 6 --> corners_ratio: 5/6
+    :param datafile:    str, name of the csv datafile containing the 
+                        statistics that we want to convert based on the "strategy" parameter
+    :param strategy:    str, name of the strategy according to which we should convert our data.
+                        Current options are: ["ratio", "diff"]
+    :return:            None
+    """
+    dataset = pd.read_csv(datafile)
+    dataset_new = copy.deepcopy(dataset)
+    if strategy == "diff":
+        goals_full_time_diff = dataset.home_team_goals_full_time - dataset.away_team_goals_full_time
+        goals_full_time_diff = goals_full_time_diff.rename("home_team_goals_full_time")
+        goals_half_time_diff = dataset.home_team_goals_half_time - dataset.away_team_goals_half_time
+        goals_half_time_diff = goals_half_time_diff.rename("home_team_goals_half_time")
+        corners_diff = dataset.home_team_corners - dataset.away_team_corners
+        corners_diff = corners_diff.rename("home_team_corners")
+        fouls_diff = dataset.home_team_fouls - dataset.away_team_fouls
+        fouls_diff = fouls_diff.rename("home_team_fouls")
+        offsides_diff = dataset.home_team_offsides - dataset.away_team_offsides
+        offsides_diff = offsides_diff.rename("home_team_offsides")
+        shots_on_target_diff = dataset.home_team_shots_on_target - dataset.away_team_shots_on_target
+        shots_on_target_diff = shots_on_target_diff.rename("home_team_shots_on_target")
+        
+        # Replace some columns
+        dataset_new.update(goals_full_time_diff)
+        dataset_new = dataset_new.drop("away_team_goals_full_time", axis=1)
+        dataset_new.home_team_goals_full_time.rename("goals_full_time_diff", inplace=True)
+        
+        dataset_new.update(goals_half_time_diff)
+        dataset_new = dataset_new.drop("away_team_goals_half_time", axis=1)
+        dataset_new.home_team_goals_half_time.rename("goals_half_time_diff", inplace=True)
+        
+        dataset_new.update(corners_diff)
+        dataset_new = dataset_new.drop("away_team_corners", axis=1)
+        dataset_new.home_team_corners.rename("corners_diff", inplace=True)
+        
+        dataset_new.update(fouls_diff)
+        dataset_new = dataset_new.drop("away_team_fouls", axis=1)
+        dataset_new.home_team_fouls.rename("fouls_diff", inplace=True)
+        
+        dataset_new.update(offsides_diff)
+        dataset_new = dataset_new.drop("away_team_offsides", axis=1)
+        dataset_new.home_team_offsides.rename("offsides_diff", inplace=True)
+        
+        dataset_new.update(shots_on_target_diff)
+        dataset_new = dataset_new.drop("away_team_shots_on_target", axis=1)
+        dataset_new.rename(columns={"home_team_shots_on_target": "shots_on_target_diff"}, inplace=True)
+        
+    dataset_new.to_csv(datafile.split(".")[0] + "_" + strategy + ".csv", index=False)
+        
+        
+        
+        
+        
+        
+        
