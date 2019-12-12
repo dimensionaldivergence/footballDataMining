@@ -296,17 +296,49 @@ half_times_scores = pd.concat(half_times_scores, axis=1, sort=False)
 
 
 def extract_scores(match, matches_before, stat_to_extract, team):
+    """
+    Extract average scores. Averaging is determined by the "matches_before" parameter.
+    :param match:           pandas.Series, match containing all the stats
+    :param matches_before:  pandas.DataFrame, collection of matches before current match to calculate stats from
+    :param stat_to_extract: str, name of the stat to do the averaging
+    :param team:            str, "home_team" or "away_team"
+    :return:                float, average of specific stat
+    """
     if team == 'home_team':
         return sum([int(m[stat_to_extract].strip().split()[0]) \
                    if m[team] == match[team] \
                    else int(m[stat_to_extract].strip().split()[-1]) \
-                   for i, m in matches_before.iterrows()])
+                   for _, m in matches_before.iterrows()]) / len(matches_before)
     else: # away_team
         return sum([int(m[stat_to_extract].strip().split()[-1]) \
                    if m[team] == match[team] \
                    else int(m[stat_to_extract].strip().split()[0]) \
-                   for i, m in matches_before.iterrows()])
+                   for _, m in matches_before.iterrows()]) / len(matches_before)
 
+
+def calculate_points(match, matches_before, team):
+    """
+    Somewhat similar to the "extract_scores" function, after extracting the
+    full_time_score for specific matches, calculate points collected according to the following:
+    Home team win -> home team points += 3
+    Away team win -> away team points += 3
+    Draw -> Both teams points += 1
+    :param match:           pandas.Series, match containing all the stats
+    :param matches_before:  pandas.DataFrame, collection of matches before current match to calculate stats from
+    :param team:            str, "home_team" or "away_team"
+    :return:                float, average of specific stat
+    """
+    points = 0
+    for _, m in matches_before.iterrows():
+        home_goals = int(m['full_time_score'].strip().split()[0])
+        away_goals = int(m['full_time_score'].strip().split()[-1])
+        if home_goals - away_goals > 0 and team == 'home_team':
+            points += 3
+        elif away_goals - home_goals > 0 and team == 'away_team':
+            points += 3
+        if home_goals == away_goals:
+            points += 1
+    return points / len(matches_before)
 
 def evaluate_score(match, categories):
     """
@@ -315,22 +347,29 @@ def evaluate_score(match, categories):
     0   -> "Draw"
     1   -> "Home win"
     2   -> "Away win"
-    For "handicap" the outcomes are as follows:
+    For "all_variations" the outcomes are as follows:
     0   -> "Draw"
     1   -> "Home win by 1 goal"
     2   -> "Away win by 1 goal"
     3   -> "Home win by 2 goals"
     4   -> "Away win by 2 goals"
     5   -> "Any other score"
+    For "draw_and_handicap":
+    0   -> "Draw"
+    1   -> "Home win by 1 goal"
+    2   -> "Away win by 1 goal"
+    3   -> "Any other score"
     :param match:               pd.DataFrame instance containing all the information for a match
-    :param categories:          str, one of ["traditional","handicap"] meaning "Home | Draw | Away" or
-                                     "Home by 1 | Draw | Away by 1 | Home by 2 | Away by 2 | Else".
+    :param categories:          str, one of ["traditional","all_variations", "draw_and_handicap"] 
+                                     meaning "Home | Draw | Away" or
+                                     "Home by 1 | Draw | Away by 1 | Home by 2 | Away by 2 | Else" or
+                                     "Draw | "Home by 1 | Else".
                                      It will determine the number of outcomes
     :return:                    match_outcome_full_time, match_outcome_half_time
     """
     full_time_difference = int(match['full_time_score'].strip().split()[0]) - int(match['full_time_score'].strip().split()[-1])
     half_time_difference = int(match['half_time_score'].strip().split()[0]) - int(match['half_time_score'].strip().split()[-1])
-    if categories == "handicap":
+    if categories == "all_variations":
         if full_time_difference == 0: match_outcome_full_time = 0
         elif full_time_difference == 1: match_outcome_full_time = 1
         elif full_time_difference == -1: match_outcome_full_time = 2
@@ -344,7 +383,7 @@ def evaluate_score(match, categories):
         elif half_time_difference == 2: match_outcome_half_time = 3
         elif half_time_difference == -2: match_outcome_half_time = 4
         else: match_outcome_half_time = 5
-    else: # "traditional"
+    elif categories == "traditional":
         if full_time_difference == 0: match_outcome_full_time = 0
         elif full_time_difference > 0: match_outcome_full_time = 1
         else: match_outcome_full_time = 2
@@ -352,6 +391,16 @@ def evaluate_score(match, categories):
         if half_time_difference == 0: match_outcome_half_time = 0
         elif half_time_difference > 0: match_outcome_half_time = 1
         else: match_outcome_half_time = 2
+    else: # "draw_and_handicap"
+        if full_time_difference == 0: match_outcome_full_time = 0
+        elif full_time_difference == 1: match_outcome_full_time = 1
+        elif full_time_difference == -1: match_outcome_full_time = 2
+        else: match_outcome_full_time = 3
+            
+        if half_time_difference == 0: match_outcome_half_time = 0
+        elif half_time_difference == 1: match_outcome_half_time = 1
+        elif half_time_difference == -1: match_outcome_half_time = 2
+        else: match_outcome_half_time = 3
     
     return match_outcome_full_time, match_outcome_half_time
 
@@ -359,57 +408,59 @@ def prepare_data_for_ML(matches_behind, categories):
     """
     Process all the gathered football matches and generate statistics of previous x matches,
     where x is the "matches_behind" integer parameter.
-    :param matches_behind:      int, number of matches behind current match to take stats from
-    :param categories:          str, one of ["traditional","handicap"] meaning "Home | Draw | Away" or
-                                     "Home by 1 | Draw | Away by 1 | Home by 2 | Away by 2 | Else".
-                                     It will determine the number of outcomes
-    :return:                    None
+    :param matches_behind:    int, number of matches behind current match to take stats from
+    :param categories:        str, one of ["traditional","draw_and_handicap","all_variations"], which
+                              will determine the number of outcomes.
+    :return:                  None
     """
     data_for_ML = []
     all_matches_clean = pd.read_csv('all_matches_clean.csv')
     for league_id in potential_leagues:
-        current_league_matches = all_matches_clean[all_matches_clean['league_id'] == league_id].sort_values('match_time').reset_index(drop=True)        
+        current_league_matches = all_matches_clean[all_matches_clean['league_id'] == league_id].sort_values('match_time').reset_index(drop=True)
+        # Cycle through all matches
         for idx, match in current_league_matches.iterrows():
-            try:
-                # Find all matches having any of the current teams from before its match_time
-                matches_before = current_league_matches[current_league_matches['match_time'] < match['match_time']]
-                matches_before_home_team = matches_before[(matches_before['home_team'] == match['home_team']) | \
-                                                          (matches_before['away_team'] == match['home_team'])][-matches_behind:]
-                matches_before_away_team = matches_before[(matches_before['home_team'] == match['away_team']) | \
-                                                          (matches_before['away_team'] == match['away_team'])][-matches_behind:]
-                if len(matches_before_home_team) == matches_behind and len(matches_before_away_team) == matches_behind:
+            # Find all matches having any of the current teams from before its match_time
+            matches_before = current_league_matches[current_league_matches['match_time'] < match['match_time']]
+            matches_before_home_team = matches_before[(matches_before['home_team'] == match['home_team']) | \
+                                                    (matches_before['away_team'] == match['home_team'])][-matches_behind:]
+            matches_before_away_team = matches_before[(matches_before['home_team'] == match['away_team']) | \
+                                                    (matches_before['away_team'] == match['away_team'])][-matches_behind:]
+            if len(matches_before_home_team) == matches_behind and len(matches_before_away_team) == matches_behind:
+                # Initialize match stats
+                match_stats = {'league_id': match.league_id, 'match_time': match.match_time, 'match_url': match.match_url,
+                               'home_team': match.home_team, 'away_team': match.away_team, 'full_time_score': match.full_time_score,
+                               'half_time_score': match.half_time_score}
+                for i in range(matches_behind, 0, -1):
+                    i_matches_before_home_team = matches_before_home_team[-i:]
+                    i_matches_before_away_team = matches_before_away_team[-i:]
+            
                     # Home team stats
-                    home_team_goals_full_time = extract_scores(match, matches_before_home_team, 'full_time_score', 'home_team')
-                    home_team_goals_half_time = extract_scores(match, matches_before_home_team, 'half_time_score', 'home_team')
-                    home_team_corners = extract_scores(match, matches_before_home_team, 'corners', 'home_team')
-                    home_team_offsides = extract_scores(match, matches_before_home_team, 'offsides', 'home_team')
-                    home_team_shots_on_target = extract_scores(match, matches_before_home_team, 'shots_on_target', 'home_team')
-                    home_team_fouls = extract_scores(match, matches_before_home_team, 'fouls', 'home_team')
+                    match_stats['{}_home_team_points'.format(i)] = calculate_points(match, i_matches_before_home_team, 'home_team')
+                    match_stats['{}_home_team_goals_full_time'.format(i)] = extract_scores(match, i_matches_before_home_team, 'full_time_score', 'home_team')
+                    match_stats['{}_home_team_goals_half_time'.format(i)] = extract_scores(match, i_matches_before_home_team, 'half_time_score', 'home_team')
+                    match_stats['{}_home_team_corners'.format(i)] = extract_scores(match, i_matches_before_home_team, 'corners', 'home_team')
+                    match_stats['{}_home_team_offsides'.format(i)] = extract_scores(match, i_matches_before_home_team, 'offsides', 'home_team')
+                    match_stats['{}_home_team_shots_on_target'.format(i)] = extract_scores(match, i_matches_before_home_team, 'shots_on_target', 'home_team')
+                    match_stats['{}_home_team_fouls'.format(i)] = extract_scores(match, i_matches_before_home_team, 'fouls', 'home_team')
                     
                     # Away team stats
-                    away_team_goals_full_time = extract_scores(match, matches_before_away_team, 'full_time_score', 'away_team')
-                    away_team_goals_half_time = extract_scores(match, matches_before_away_team, 'half_time_score', 'away_team')
-                    away_team_corners = extract_scores(match, matches_before_away_team, 'corners', 'away_team')
-                    away_team_offsides = extract_scores(match, matches_before_away_team, 'offsides', 'away_team')
-                    away_team_shots_on_target = extract_scores(match, matches_before_away_team, 'shots_on_target', 'away_team')
-                    away_team_fouls = extract_scores(match, matches_before_away_team, 'fouls', 'away_team')
-                else:
-                    continue
-                
-                match_outcome_full_time, match_outcome_half_time = evaluate_score(match, categories=categories)                    
-                
-                data_for_ML.append(pd.Series({'league_id': match.league_id, 'match_time': match.match_time, 'match_url': match.match_url,
-                                              'home_team': match.home_team, 'away_team': match.away_team, 'full_time_score': match.full_time_score,
-                                              'half_time_score': match.half_time_score, 
-                                              'home_team_goals_full_time': home_team_goals_full_time, 'home_team_goals_half_time': home_team_goals_half_time,
-                                              'home_team_corners': home_team_corners, 'home_team_offsides': home_team_offsides, 
-                                              'home_team_shots_on_target': home_team_shots_on_target, 'home_team_fouls': home_team_fouls,
-                                              'away_team_goals_full_time': away_team_goals_full_time, 'away_team_goals_half_time': away_team_goals_half_time,
-                                              'away_team_corners': away_team_corners, 'away_team_offsides': away_team_offsides, 
-                                              'away_team_shots_on_target': away_team_shots_on_target, 'away_team_fouls': away_team_fouls,
-                                              'match_outcome_full_time': match_outcome_full_time, 'match_outcome_half_time': match_outcome_half_time}))
-            except Exception:
-                print(traceback.print_exc())
+                    match_stats['{}_away_team_points'.format(i)] = calculate_points(match, i_matches_before_away_team, 'away_team')
+                    match_stats['{}_away_team_goals_full_time'.format(i)] = extract_scores(match, i_matches_before_away_team, 'full_time_score', 'away_team')
+                    match_stats['{}_away_team_goals_half_time'.format(i)] = extract_scores(match, i_matches_before_away_team, 'half_time_score', 'away_team')
+                    match_stats['{}_away_team_corners'.format(i)] = extract_scores(match, i_matches_before_away_team, 'corners', 'away_team')
+                    match_stats['{}_away_team_offsides'.format(i)] = extract_scores(match, i_matches_before_away_team, 'offsides', 'away_team')
+                    match_stats['{}_away_team_shots_on_target'.format(i)] = extract_scores(match, i_matches_before_away_team, 'shots_on_target', 'away_team')
+                    match_stats['{}_away_team_fouls'.format(i)] = extract_scores(match, i_matches_before_away_team, 'fouls', 'away_team')
+
+                # Evaluate outcome after statistics of last x matches have been created
+                match_outcome_full_time, match_outcome_half_time = evaluate_score(match, categories=categories)
+                match_stats['match_outcome_full_time'] = match_outcome_full_time
+                match_stats['match_outcome_half_time'] = match_outcome_half_time
+            else:
+                continue
+            
+            # Append all the data to the list 'data_for_ML'
+            data_for_ML.append(pd.Series(match_stats))
         
     data_for_ML_csv = pd.concat(data_for_ML, axis=1, sort=False).transpose()
     data_for_ML_csv.to_csv('matches_ready_for_ML_{}_{}.csv'.format(matches_behind, categories), index=False)

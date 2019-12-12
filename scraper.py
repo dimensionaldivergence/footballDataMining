@@ -4,13 +4,7 @@ from lib_scraper import *
 
 #browse_matches_for_stats()
 
-for i in range(1,8):
-    #prepare_data_for_ML(matches_behind=i, categories="handicap")
-    #prepare_data_for_ML(matches_behind=i, categories="traditional")
-
-    convert_data_for_ML('matches_ready_for_ML_{}_handicap.csv'.format(i))
-    convert_data_for_ML('matches_ready_for_ML_{}_traditional.csv'.format(i))
-
+prepare_data_for_ML(matches_behind=5, categories="draw_and_handicap")
 
     
 """
